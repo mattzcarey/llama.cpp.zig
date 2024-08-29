@@ -11,11 +11,11 @@ const TokenDataArray = llama.TokenDataArray;
 
 pub const Args = struct {
     model_path: [:0]const u8 = "models/dolphin-2.2.1-mistral-7b.Q3_K_M.gguf",
-    prompt: ?[]const u8 = null,
-    max_len: usize = 1024, // generate until eos, or this many characters are in prompt
-    seed: ?u32 = null,
-    threads: ?usize = null,
-    threads_batch: ?usize = null,
+    prompt: [:0]const u8 = "", // Changed from ?[]const u8 to [:0]const u8 with a default value
+    max_len: usize = 1024,
+    seed: u32 = 0,
+    threads: usize = 0,
+    threads_batch: usize = 0,
     gpu_layers: i32 = 0,
 };
 
@@ -31,15 +31,15 @@ pub fn run(alloc: std.mem.Allocator, args: Args) !void {
     defer model.deinit();
 
     var cparams = Context.defaultParams();
-    cparams.seed = args.seed orelse 1234;
+    cparams.seed = args.seed; // Remove the if statement
     const n_ctx_train = model.nCtxTrain();
     const n_ctx = n_ctx_train;
     cparams.n_ctx = @intCast(n_ctx_train);
     if (n_ctx > n_ctx_train) slog.warn("model was trained on only {} context tokens ({} specified)\n", .{ n_ctx_train, n_ctx });
 
-    const cpu_threads = try std.Thread.getCpuCount(); // logical cpu cores
-    cparams.n_threads = @intCast(args.threads orelse @min(cpu_threads, 4)); // for me: non batched doesn't scale above 3-4 cores
-    cparams.n_threads_batch = @intCast(args.threads_batch orelse cpu_threads / 2); // for me without 2x hyperthreads per core works faster
+    const cpu_threads = try std.Thread.getCpuCount();
+    cparams.n_threads = @intCast(if (args.threads == 0) @min(cpu_threads, 4) else args.threads);
+    cparams.n_threads_batch = @intCast(if (args.threads_batch == 0) cpu_threads / 2 else args.threads_batch);
 
     const ctx = try llama.Context.initWithModel(model, cparams);
     defer ctx.deinit();
@@ -50,7 +50,7 @@ pub fn run(alloc: std.mem.Allocator, args: Args) !void {
         .batch_size = 512,
     });
     defer prompt.deinit();
-    try prompt.appendText(args.prompt orelse @panic("--prompt argument is required"), true);
+    try prompt.appendText(args.prompt, true);
     const initial_prompt_len = prompt.tokens.items.len;
 
     var detokenizer = llama.Detokenizer.init(alloc);
@@ -107,3 +107,23 @@ pub const std_options = struct {
     pub const log_level = std.log.Level.debug;
     pub const log_scope_levels: []const std.log.ScopeLevel = &.{.{ .scope = .llama_cpp, .level = .info }};
 };
+
+export fn run_simple(model_path: [*:0]const u8, prompt: [*:0]const u8, max_len: usize, seed: u32, threads: usize, threads_batch: usize, gpu_layers: i32) void {
+    var args = Args{
+        .model_path = std.mem.span(model_path),
+        .prompt = std.mem.span(prompt),
+        .max_len = max_len,
+        .seed = seed,
+        .threads = threads,
+        .threads_batch = threads_batch,
+        .gpu_layers = gpu_layers,
+    };
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer if (gpa.deinit() != .ok) @panic("memory leak detected when exiting");
+    const alloc = gpa.allocator();
+
+    run(alloc, args) catch |err| {
+        std.debug.print("Error: {}\n", .{err});
+    };
+}

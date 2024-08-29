@@ -6,6 +6,9 @@ pub fn parseArgs(comptime ArgsStruct: type, args: [][:0]u8) !?ArgsStruct {
     var self = ArgsStruct{};
     var arg_i: usize = 0;
     var total_parsed_args: usize = 0;
+    if (@hasField(ArgsStruct, "prompt")) {
+        @field(self, "prompt") = "";
+    }
     while (arg_i < args.len) : (arg_i += 1) {
         var curr = args[arg_i];
         const next: ?[:0]const u8 = if (arg_i + 1 < args.len) args[arg_i + 1] else null;

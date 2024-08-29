@@ -126,6 +126,17 @@ pub fn build(b: *std.Build) !void {
     llama_zig.sample("examples", "interactive");
     if (opencl_maybe != null) llama_zig.sample("examples", "opencl_devices");
 
+    // Add this to create a shared library
+    const lib = b.addSharedLibrary(.{
+        .name = "llama_simple",
+        .root_source_file = .{ .path = "examples/simple.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    lib.addModule("llama", llama_zig.module);
+    llama_zig.link(lib);
+    b.installArtifact(lib);
+
     { // tests
         const main_tests = b.addTest(.{
             .root_source_file = .{ .path = "llama.cpp.zig/llama.zig" },
